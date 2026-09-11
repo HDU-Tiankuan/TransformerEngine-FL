@@ -300,10 +300,7 @@ class NPUBackend(TEFLBackendBase):
                 if mode == 0:
                     grad_fp32 = grad_fp32 + weight_decay * param_fp32
                 next_exp_avg = beta1 * exp_avg.float() + (1.0 - beta1) * grad_fp32
-                next_exp_avg_sq = (
-                    beta2 * exp_avg_sq.float()
-                    + (1.0 - beta2) * grad_fp32 * grad_fp32
-                )
+                next_exp_avg_sq = beta2 * exp_avg_sq.float() + (1.0 - beta2) * grad_fp32 * grad_fp32
                 update = next_exp_avg / (next_exp_avg_sq.sqrt() + epsilon)
                 if mode == 1:
                     update = update + weight_decay * param_fp32
@@ -351,9 +348,7 @@ class NPUBackend(TEFLBackendBase):
                     exp_avg if exp_avg.dtype == torch.float32 else exp_avg.detach().float()
                 )
                 work_exp_avg_sq = (
-                    exp_avg_sq
-                    if exp_avg_sq.dtype == torch.float32
-                    else exp_avg_sq.detach().float()
+                    exp_avg_sq if exp_avg_sq.dtype == torch.float32 else exp_avg_sq.detach().float()
                 )
 
             fused_grad = (
