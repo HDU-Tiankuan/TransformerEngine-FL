@@ -319,7 +319,6 @@ class _GroupedLinear(torch.autograd.Function):
             if hasattr(recipe, "fp8_gemm_fprop"):
                 use_split_accumulator = recipe.fp8_gemm_fprop.use_split_accumulator
 
-        # NOTE-LZC 这里是判断list还是对象的地方
         general_grouped_gemm_for_grouped_tensor(
             weights_for_gemm,
             grouped_x,
@@ -434,7 +433,6 @@ class _GroupedLinear(torch.autograd.Function):
             backward_override = None
         if backward_override == "high_precision":
             save_original_input = True
-        # NOTE-LZC 这里默认读取的是list,无法区分对象，但是依赖于 _get_weight_tensors()函数的返回值不是list
         num_gemms = len(m_splits)
         weights = weights_and_biases[:num_gemms]
         biases = weights_and_biases[num_gemms:]
@@ -1732,7 +1730,6 @@ class GroupedLinear(TransformerEngineBaseModule):
         inp = self.prepare_forward(inp, num_gemms=self.num_gemms)
 
         try:
-            # NOTE-LZC 这里会进行weight的导出，需要注意是一整块还是分块
             weight_tensors = self._get_weight_tensors()
             bias_tensors = self._get_bias_tensors()
 
