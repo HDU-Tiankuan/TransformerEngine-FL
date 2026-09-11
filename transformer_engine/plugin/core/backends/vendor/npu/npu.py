@@ -131,6 +131,7 @@ class NPUBackend(TEFLBackendBase):
 
     # ===================== LayerNorm =====================
 
+    # NPU backend adaptation: return output and saved statistics from one native NPU call.
     def layernorm_fwd(
         self,
         input: torch.Tensor,
@@ -143,26 +144,18 @@ class NPUBackend(TEFLBackendBase):
         sm_margin: int,
         zero_centered_gamma: bool,
     ) -> Tuple[Any, torch.Tensor, torch.Tensor]:
-        """Apply TENPU LayerNormLinear semantics on Ascend.
-
-        TENPU computes the dense LayerNorm output with PyTorch's NPU path,
-        computes mean/reciprocal standard deviation separately for backward,
-        and applies optional activation quantization as a separate operation.
-        ``sm_margin`` is a CUDA-only tuning input and has no NPU equivalent.
-        """
+        """Apply LayerNorm with the NPU native three-output operator."""
 
         del sm_margin
         gamma = weight + 1 if zero_centered_gamma else weight
-        output = torch.nn.functional.layer_norm(
-            input,
-            (input.shape[-1],),
-            weight=gamma,
-            bias=bias,
-            eps=eps,
+        _get_torch_npu()  # Register the NPU implementation for aten native operators.
+        output, mean, rsigma = torch.ops.aten.native_layer_norm.default(
+            input.contiguous(),
+            list(weight.shape),
+            gamma.contiguous(),
+            None if bias is None else bias.contiguous(),
+            eps,
         )
-        mean = input.mean(dim=-1, keepdim=True)
-        variance = input.var(dim=-1, unbiased=False, keepdim=True)
-        rsigma = torch.rsqrt(variance + eps)
 
         output_dtype = _to_torch_dtype(otype)
         if output_dtype is not None and output.dtype != output_dtype:
@@ -195,6 +188,7 @@ class NPUBackend(TEFLBackendBase):
         # only that dimension before feeding the common backward ABI.
         return output, mean.squeeze(-1), rsigma.squeeze(-1)
 
+    # NPU backend adaptation: consume saved statistics with the native NPU backward operator.
     def layernorm_bwd(
         self,
         dz: torch.Tensor,
@@ -205,7 +199,7 @@ class NPUBackend(TEFLBackendBase):
         sm_margin: int,
         zero_centered_gamma: bool,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Differentiate LayerNorm with TENPU's Ascend tensor composition."""
+        """Differentiate LayerNorm with the NPU native backward operator."""
 
         del sm_margin
         if mu.ndim < x.ndim:
@@ -213,24 +207,25 @@ class NPUBackend(TEFLBackendBase):
         if rsigma.ndim < x.ndim:
             rsigma = rsigma.unsqueeze(-1)
 
-        hidden_size = x.shape[-1]
-        x_hat = (x - mu) * rsigma
         gamma_adjusted = gamma + 1 if zero_centered_gamma else gamma
-        dx_hat = dz * gamma_adjusted
-        dvar = (
-            dx_hat * (x - mu) * (-0.5) * rsigma.pow(3)
-        ).sum(dim=-1, keepdim=True)
-        dmean = (-dx_hat * rsigma).sum(dim=-1, keepdim=True) + dvar * (
-            -2.0 / hidden_size
-        ) * (x - mu).sum(dim=-1, keepdim=True)
-        dx = (
-            dx_hat * rsigma
-            + dvar * 2.0 / hidden_size * (x - mu)
-            + dmean / hidden_size
+        _get_torch_npu()  # Register the NPU implementation for aten native operators.
+        dx, dgamma, dbeta = torch.ops.aten.native_layer_norm_backward.default(
+            dz.contiguous(),
+            x.contiguous(),
+            list(gamma.shape),
+            mu.contiguous(),
+            rsigma.contiguous(),
+            gamma_adjusted.contiguous(),
+            None,
+            [True, True, True],
         )
-        reduce_dims = tuple(range(dz.ndim - 1))
-        dgamma = (dz * x_hat).sum(dim=reduce_dims)
-        dbeta = dz.sum(dim=reduce_dims)
+
+        # CANN accumulates parameter gradients in FP32 for FP16/BF16 inputs,
+        # while Transformer Engine returns gradients in the parameter dtype.
+        if dgamma.dtype != gamma.dtype:
+            dgamma = dgamma.to(gamma.dtype)
+        if dbeta.dtype != gamma.dtype:
+            dbeta = dbeta.to(gamma.dtype)
         return dx, dgamma, dbeta
 
     # ===================== RMSNorm =====================
