@@ -198,6 +198,7 @@ class _GroupedLinear(torch.autograd.Function):
         cache_weight: bool,
     ) -> Tuple[List[torch.Tensor], List[Optional[QuantizedTensorStorage]]]:
         """Prepare discrete weight tensors for GroupedTensor GEMM."""
+        # 这里默认返回list,不会使用全group路径
         weights_for_gemm: List[torch.Tensor] = []
         new_workspaces: List[Optional[QuantizedTensorStorage]] = [None] * len(weights)
         if not with_quantized_compute:
@@ -318,6 +319,7 @@ class _GroupedLinear(torch.autograd.Function):
             if hasattr(recipe, "fp8_gemm_fprop"):
                 use_split_accumulator = recipe.fp8_gemm_fprop.use_split_accumulator
 
+        # NOTE-LZC 这里是判断list还是对象的地方
         general_grouped_gemm_for_grouped_tensor(
             weights_for_gemm,
             grouped_x,
@@ -432,7 +434,7 @@ class _GroupedLinear(torch.autograd.Function):
             backward_override = None
         if backward_override == "high_precision":
             save_original_input = True
-
+        # NOTE-LZC 这里默认读取的是list,无法区分对象，但是依赖于 _get_weight_tensors()函数的返回值不是list
         num_gemms = len(m_splits)
         weights = weights_and_biases[:num_gemms]
         biases = weights_and_biases[num_gemms:]
@@ -1440,10 +1442,10 @@ class GroupedLinear(TransformerEngineBaseModule):
         weight_quantizers = self._get_weight_quantizers()
         recipe = (
             weight_quantizers[0]._get_compatible_recipe()
-            if weight_quantizers and weight_quantizers[0] is not None
-            else None
+            if weight_quantizers and weight_quantizers[0] is not none
+            else none
         )
-        if recipe is not None and (recipe.delayed() or recipe.float8_current_scaling()):
+        if recipe is not none and (recipe.delayed() or recipe.float8_current_scaling()):
             self.set_tensor_parallel_attributes(defer_init=defer_init)
             return
 
@@ -1730,6 +1732,7 @@ class GroupedLinear(TransformerEngineBaseModule):
         inp = self.prepare_forward(inp, num_gemms=self.num_gemms)
 
         try:
+            # NOTE-LZC 这里会进行weight的导出，需要注意是一整块还是分块
             weight_tensors = self._get_weight_tensors()
             bias_tensors = self._get_bias_tensors()
 

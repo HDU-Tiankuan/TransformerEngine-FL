@@ -53,12 +53,10 @@ def _tenpu_backward(grad, x, weight, mean, rsigma, zero_centered_gamma):
     x_hat = (x - mean) * rsigma
     gamma = weight + 1 if zero_centered_gamma else weight
     dx_hat = grad * gamma
-    dvar = (dx_hat * (x - mean) * (-0.5) * rsigma.pow(3)).sum(
-        dim=-1, keepdim=True
-    )
-    dmean = (-dx_hat * rsigma).sum(dim=-1, keepdim=True) + dvar * (
-        -2.0 / hidden_size
-    ) * (x - mean).sum(dim=-1, keepdim=True)
+    dvar = (dx_hat * (x - mean) * (-0.5) * rsigma.pow(3)).sum(dim=-1, keepdim=True)
+    dmean = (-dx_hat * rsigma).sum(dim=-1, keepdim=True) + dvar * (-2.0 / hidden_size) * (
+        x - mean
+    ).sum(dim=-1, keepdim=True)
     dx = dx_hat * rsigma + dvar * 2.0 / hidden_size * (x - mean) + dmean / hidden_size
     reduce_dims = tuple(range(grad.ndim - 1))
     dweight = (grad * x_hat).sum(dim=reduce_dims)
@@ -106,13 +104,13 @@ class TestLayerNormTENPUParity(unittest.TestCase):
                 x = torch.randn(shape, generator=generator, dtype=torch.float32).to(
                     device="npu", dtype=dtype
                 )
-                weight = torch.randn(
-                    (shape[-1],), generator=generator, dtype=torch.float32
-                ).to(device="npu", dtype=dtype)
+                weight = torch.randn((shape[-1],), generator=generator, dtype=torch.float32).to(
+                    device="npu", dtype=dtype
+                )
                 bias = (
-                    torch.randn(
-                        (shape[-1],), generator=generator, dtype=torch.float32
-                    ).to(device="npu", dtype=dtype)
+                    torch.randn((shape[-1],), generator=generator, dtype=torch.float32).to(
+                        device="npu", dtype=dtype
+                    )
                     if with_bias
                     else None
                 )
@@ -169,9 +167,7 @@ class TestLayerNormTENPUParity(unittest.TestCase):
             0,
             False,
         )
-        expected, expected_mean, expected_rsigma = _tenpu_forward(
-            x, weight, bias, 1.0e-5, False
-        )
+        expected, expected_mean, expected_rsigma = _tenpu_forward(x, weight, bias, 1.0e-5, False)
         self.assertIs(output, output_buffer)
         torch.testing.assert_close(output, expected.bfloat16(), rtol=0, atol=0)
         torch.testing.assert_close(mean, expected_mean, rtol=0, atol=0)
@@ -183,8 +179,7 @@ class TestLayerNormTENPUParity(unittest.TestCase):
         device_name = torch.npu.get_device_name(0)
         if "950" not in device_name:
             self.skipTest(
-                "NPU dynamic FP8 quantization requires Ascend950; "
-                f"current device is {device_name}"
+                f"NPU dynamic FP8 quantization requires Ascend950; current device is {device_name}"
             )
 
         from transformer_engine.pytorch.constants import DType as PyDType
@@ -218,9 +213,7 @@ class TestLayerNormTENPUParity(unittest.TestCase):
             0,
             False,
         )
-        dense, expected_mean, expected_rsigma = _tenpu_forward(
-            x, weight, bias, 1.0e-5, False
-        )
+        dense, expected_mean, expected_rsigma = _tenpu_forward(x, weight, bias, 1.0e-5, False)
         expected = expected_quantizer.quantize(dense)
         torch.testing.assert_close(output._data, expected._data, rtol=0, atol=0)
         torch.testing.assert_close(output._scale_inv, expected._scale_inv, rtol=0, atol=0)

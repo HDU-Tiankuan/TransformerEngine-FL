@@ -437,6 +437,8 @@ def _get_fp32_zeros_tensor(num_tensors: int, device: torch.device) -> torch.Tens
     return torch.zeros(num_tensors, dtype=torch.float32, device=device)
 
 
+# NOTE-LZC 这里是判断是list还是对象的地方
+# 这里适配前两个算子就可以了
 def general_grouped_gemm_for_grouped_tensor(
     A,
     B,
@@ -484,9 +486,6 @@ def general_grouped_gemm_for_grouped_tensor(
         grouped_gemm_impl = tex.te_general_grouped_gemm_for_discrete_in
     else:
         # Use-case: Single Grouped Parameter for Weight/ Weight Grads.
-        grouped_gemm_impl = tex.te_general_grouped_gemm_for_grouped_tensor
-
-    if is_discrete_out and bias is not None:
         raise ValueError(
             "Bias is not supported when out is a list (discrete_out mode) yet. "
             "Apply bias manually after the GEMM."
@@ -501,6 +500,7 @@ def general_grouped_gemm_for_grouped_tensor(
 
     # Hopper (SM90) uses a single shared alpha/beta scalar;
     # Blackwell+ (SM100) supports per-group alpha/beta arrays.
+    # NOTE-LZC 这里的问题需要配置环境变量，也不算问题
     per_group = torch.cuda.get_device_capability() >= (10, 0)
     num_alphabeta = num_tensors if per_group else 1
 
