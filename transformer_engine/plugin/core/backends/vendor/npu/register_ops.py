@@ -53,6 +53,24 @@ def register_builtins(registry) -> None:
             vendor="NPU",
             priority=100,
         ),
+        # LayerNorm forward
+        OpImpl(
+            op_name="layernorm_fwd",
+            impl_id="vendor.npu",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.layernorm_fwd, is_avail),
+            vendor="NPU",
+            priority=100,
+        ),
+        # LayerNorm backward
+        OpImpl(
+            op_name="layernorm_bwd",
+            impl_id="vendor.npu",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.layernorm_bwd, is_avail),
+            vendor="NPU",
+            priority=100,
+        ),
         # RMSNorm forward
         OpImpl(
             op_name="rmsnorm_fwd",
@@ -86,6 +104,15 @@ def register_builtins(registry) -> None:
             impl_id="vendor.npu",
             kind=BackendImplKind.VENDOR,
             fn=_bind_is_available(backend.multi_tensor_l2norm, is_avail),
+            vendor="NPU",
+            priority=100,
+        ),
+        # Multi-tensor Adam/AdamW
+        OpImpl(
+            op_name="multi_tensor_adam",
+            impl_id="vendor.npu",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.multi_tensor_adam, is_avail),
             vendor="NPU",
             priority=100,
         ),
@@ -125,6 +152,23 @@ def register_builtins(registry) -> None:
             vendor="NPU",
             priority=100,
         ),
+        # ===================== Discrete GroupedTensor GEMM adaptation =====================
+        OpImpl(
+            op_name="te_general_grouped_gemm_for_discrete_in",
+            impl_id="vendor.npu",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.te_general_grouped_gemm_for_discrete_in, is_avail),
+            vendor="NPU",
+            priority=100,
+        ),
+        OpImpl(
+            op_name="te_general_grouped_gemm_for_discrete_out",
+            impl_id="vendor.npu",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.te_general_grouped_gemm_for_discrete_out, is_avail),
+            vendor="NPU",
+            priority=100,
+        ),
         # Generic GEMM
         OpImpl(
             op_name="generic_gemm",
@@ -134,12 +178,41 @@ def register_builtins(registry) -> None:
             vendor="NPU",
             priority=100,
         ),
+        # ===================== splits_to_offsets adaptation =====================
+        OpImpl(
+            op_name="splits_to_offsets",
+            impl_id="vendor.npu",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.splits_to_offsets, is_avail),
+            vendor="NPU",
+            priority=100,
+        ),
         # Grouped GEMM
         OpImpl(
             op_name="te_general_grouped_gemm",
             impl_id="vendor.npu",
             kind=BackendImplKind.VENDOR,
             fn=_bind_is_available(backend.te_general_grouped_gemm, is_avail),
+            vendor="NPU",
+            priority=100,
+        ),
+        # Dense GroupedTensor GEMM adaptation
+        OpImpl(
+            op_name="te_general_grouped_gemm_for_grouped_tensor",
+            impl_id="vendor.npu",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(
+                backend.te_general_grouped_gemm_for_grouped_tensor, is_avail
+            ),
+            vendor="NPU",
+            priority=100,
+        ),
+        # NPU grouped matmul does not require CUDA pointer-setup workspace.
+        OpImpl(
+            op_name="get_grouped_gemm_setup_workspace_size",
+            impl_id="vendor.npu",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.get_grouped_gemm_setup_workspace_size, is_avail),
             vendor="NPU",
             priority=100,
         ),
