@@ -356,6 +356,129 @@ class NPUBackend(TEFLBackendBase):
         opt = _get_tenpu_optimizers()
         opt.multi_tensor_scale(chunk_size, noop_flag, tensor_lists, scale)
 
+    # NPU backend adaptation: keep the tensor scale on device and use ACLNN AMP foreach.
+    def multi_tensor_scale_tensor(
+        self,
+        chunk_size: int,
+        noop_flag: torch.Tensor,
+        tensor_lists: List[List[torch.Tensor]],
+        scale: torch.Tensor,
+    ) -> None:
+        """Scale tensor lists with a device-resident scalar and report non-finites.
+
+        TE-FL's CUDA kernel checks the source values for Inf/NaN, always writes
+        the scaled result, and only changes the overflow flag from zero to one.
+        On Inf/NaN-capable NPU stacks, the ATen AMP foreach primitive dispatches
+        to ``aclnnForeachNonFiniteCheckAndUnscale`` for the same-dtype case.
+        Mixed-dtype output is composed from device operations because the ACLNN
+        primitive is in-place and accepts one homogeneous tensor list.
+        """
+
+        del chunk_size  # ACLNN partitions long tensor lists internally.
+        if len(tensor_lists) != 2:
+            raise ValueError(
+                "multi_tensor_scale_tensor expects [input_tensors, output_tensors], "
+                f"got {len(tensor_lists)} tensor lists"
+            )
+        input_tensors, output_tensors = tensor_lists
+        if len(input_tensors) != len(output_tensors):
+            raise ValueError(
+                "multi_tensor_scale_tensor input and output lists must have the same length"
+            )
+        if not input_tensors:
+            return
+
+        if scale.numel() != 1 or scale.dtype != torch.float32:
+            raise ValueError(
+                "multi_tensor_scale_tensor scale must be a one-element FP32 tensor"
+            )
+        if noop_flag.numel() != 1 or noop_flag.dtype != torch.int32:
+            raise ValueError(
+                "multi_tensor_scale_tensor overflow flag must be a one-element INT32 tensor"
+            )
+
+        device = input_tensors[0].device
+        input_dtype = input_tensors[0].dtype
+        output_dtype = output_tensors[0].dtype
+        supported_dtypes = (torch.float32, torch.float16, torch.bfloat16)
+        if device.type != "npu":
+            raise ValueError("multi_tensor_scale_tensor inputs must be NPU tensors")
+        if scale.device != device or noop_flag.device != device:
+            raise ValueError(
+                "multi_tensor_scale_tensor scale, overflow flag, and tensors must be "
+                "on the same NPU device"
+            )
+        if input_dtype not in supported_dtypes or output_dtype not in supported_dtypes:
+            raise TypeError(
+                "multi_tensor_scale_tensor supports FP32, FP16, and BF16 tensors"
+            )
+
+        copy_inputs: list[torch.Tensor] = []
+        copy_outputs: list[torch.Tensor] = []
+        for index, (input_tensor, output_tensor) in enumerate(
+            zip(input_tensors, output_tensors)
+        ):
+            if input_tensor.device != device or output_tensor.device != device:
+                raise ValueError(
+                    "multi_tensor_scale_tensor tensors must all be on the same NPU device"
+                )
+            if input_tensor.dtype != input_dtype or output_tensor.dtype != output_dtype:
+                raise TypeError(
+                    "multi_tensor_scale_tensor requires one dtype per input/output list"
+                )
+            if input_tensor.shape != output_tensor.shape:
+                raise ValueError(
+                    "multi_tensor_scale_tensor input/output shapes differ at index "
+                    f"{index}: {tuple(input_tensor.shape)} != {tuple(output_tensor.shape)}"
+                )
+            if not input_tensor.is_contiguous() or not output_tensor.is_contiguous():
+                raise ValueError(
+                    "multi_tensor_scale_tensor requires contiguous input and output tensors"
+                )
+            if input_tensor.data_ptr() != output_tensor.data_ptr():
+                copy_inputs.append(input_tensor)
+                copy_outputs.append(output_tensor)
+
+        torch_npu = _get_torch_npu()
+        npu_utils = getattr(getattr(torch_npu, "npu", None), "utils", None)
+        inf_nan_capability = getattr(npu_utils, "is_support_inf_nan", None)
+        supports_inf_nan = (
+            bool(inf_nan_capability()) if inf_nan_capability is not None else False
+        )
+        same_dtype = input_dtype == output_dtype
+
+        with torch.no_grad():
+            if supports_inf_nan and same_dtype:
+                # The ACLNN primitive is in-place. Copy only genuinely
+                # out-of-place pairs, preserving caller-owned output storage.
+                if copy_outputs:
+                    torch._foreach_copy_(copy_outputs, copy_inputs, non_blocking=True)
+                found_inf = torch.zeros(1, dtype=torch.float32, device=device)
+                torch._amp_foreach_non_finite_check_and_unscale_(
+                    output_tensors,
+                    found_inf,
+                    scale,
+                )
+            else:
+                # The saturation-mode torch_npu fallback synchronizes the host
+                # and skips scaling after a non-finite value. Compose the CUDA
+                # contract on device instead. For mixed dtype, convert the
+                # source to FP32 before multiplication and cast only on write.
+                all_finite = torch.ones((), dtype=torch.bool, device=device)
+                scale_scalar = scale.reshape(())
+                for input_tensor in input_tensors:
+                    all_finite.logical_and_(torch.isfinite(input_tensor).all())
+                for input_tensor, output_tensor in zip(input_tensors, output_tensors):
+                    output_tensor.copy_(input_tensor.float() * scale_scalar)
+                found_inf = (
+                    torch.logical_not(all_finite).to(dtype=torch.float32).reshape(1)
+                )
+
+            # CUDA treats this as a sticky output flag rather than a no-op input.
+            noop_flag.copy_(
+                torch.maximum(noop_flag, found_inf.to(dtype=noop_flag.dtype))
+            )
+
     def multi_tensor_l2norm(
         self,
         chunk_size: int,
