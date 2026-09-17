@@ -586,7 +586,11 @@ class NPUBackend(TEFLBackendBase):
         combined = combined + destination_term
         destination_2d.copy_(combined.to(destination.dtype))
 
-    def te_general_grouped_gemm_for_discrete_in(
+    def te_general_grouped_gemm_for_discrete_in(self, *args, **kwargs):
+        """Forward the base interface to the typed NPU implementation."""
+        return self._te_general_grouped_gemm_for_discrete_in_impl(*args, **kwargs)
+
+    def _te_general_grouped_gemm_for_discrete_in_impl(
         self,
         A: List[torch.Tensor],
         transa: bool,
@@ -749,7 +753,11 @@ class NPUBackend(TEFLBackendBase):
 
         return D
 
-    def te_general_grouped_gemm_for_discrete_out(
+    def te_general_grouped_gemm_for_discrete_out(self, *args, **kwargs):
+        """Forward the base interface to the typed NPU implementation."""
+        return self._te_general_grouped_gemm_for_discrete_out_impl(*args, **kwargs)
+
+    def _te_general_grouped_gemm_for_discrete_out_impl(
         self,
         A: Any,
         transa: bool,
@@ -1216,7 +1224,11 @@ class NPUBackend(TEFLBackendBase):
             raise ValueError(f"num_tensors must be non-negative, got {num_tensors}")
         return 0
 
-    def te_general_grouped_gemm_for_grouped_tensor(
+    def te_general_grouped_gemm_for_grouped_tensor(self, *args, **kwargs):
+        """Forward the base interface to the typed NPU implementation."""
+        return self._te_general_grouped_gemm_for_grouped_tensor_impl(*args, **kwargs)
+
+    def _te_general_grouped_gemm_for_grouped_tensor_impl(
         self,
         A: Any,
         transa: bool,
